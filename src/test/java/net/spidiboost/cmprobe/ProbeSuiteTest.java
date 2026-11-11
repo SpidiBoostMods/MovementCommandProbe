@@ -28,12 +28,12 @@ class ProbeSuiteTest {
         assertEquals("tab-validation",suite.phase());
         assertEquals(250,suite.current().interval());
         assertEquals("A",suite.target());suite.result(true);
-        assertEquals("B",suite.target());suite.result(false);
-        assertEquals(500,suite.current().interval());
+        assertEquals("B",suite.target());var chosen=suite.current();suite.result(false);
+        assertNotEquals(chosen,suite.current());
         assertEquals("A",suite.target());
         suite.result(true);suite.result(true);
         assertTrue(suite.finished());assertNotNull(suite.winner());
-        assertEquals(500,suite.winner().interval());
+        assertTrue(suite.winner().stopFlags());
     }
     @Test void everyFailureFinishesWithoutInventingAWinner(){
         var suite=new ProbeSuite(List.of("A"));

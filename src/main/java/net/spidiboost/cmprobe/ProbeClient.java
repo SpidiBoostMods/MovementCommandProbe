@@ -15,6 +15,7 @@ import net.minecraft.network.packet.c2s.play.PlayerInputC2SPacket;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.text.Text;
 import net.minecraft.util.PlayerInput;
+import net.spidiboost.cmprobe.mixin.PlayerStateAccess;
 
 public class ProbeClient implements ClientModInitializer {
     public static ProbeClient instance;
@@ -26,14 +27,14 @@ public class ProbeClient implements ClientModInitializer {
     private ProbeSuite suite;
     private ProbeSuite.Variant variant, lastVariant;
     private Object connection;
-    private boolean running, manualIdle, response, pulse, prepared, ownCommand;
-    private long frames, preparedFrame, restoreFrame, sent, answeredAt, lastSend, lastMotion, cooldown, noMotionSince;
+    private boolean running, manualIdle, response, pulse, ownCommand;
+    private long sent, answeredAt, lastSend, lastMotion, cooldown, noMotionSince;
     private long delay=1000,settle=250,resetStarted;
     private String pending="",lastTarget="",rawReply="";
     private Path report;
     private String samplePrefix="";
     private int rowCount;
-    private boolean flagsReset, calibration, controlRequest;
+    private boolean flagsReset, calibration, controlRequest, queued, stoppedSprint, stoppedSneak, waitingSneak;
     private String controlState="не выполнен";
     private final StringBuilder observed=new StringBuilder();
     private static long now(){return System.nanoTime()/1_000_000;}
@@ -97,9 +98,9 @@ public class ProbeClient implements ClientModInitializer {
         suite=automatic?new ProbeSuite(List.copyOf(names.values())):null;
         manualNames.clear();manualNames.addAll(names.values());
         rows.clear();
-        rows.add("nick,phase,variant,configured_interval_ms,actual_interval_ms,reset_ticks,stop_flags,reset_wait_ms,movement_keys,forward,backward,left,right,jump,sprint_input,sneak_input,sprinting,sneaking,horizontal_speed,stationary_ms,status,response_ms,server_text");
+        rows.add("nick,phase,variant,configured_interval_ms,actual_interval_ms,reset_ticks,send_slot,stop_flags,reset_wait_ms,movement_keys,forward,backward,left,right,jump,sprint_input,sneak_input,sprinting,sneaking,horizontal_speed,stationary_ms,status,response_ms,server_text");
         rowCount=0;pending=lastTarget=rawReply="";lastVariant=null;
-        prepared=pulse=response=flagsReset=false;restoreFrame=-1;
+        pulse=response=flagsReset=queued=waitingSneak=false;
         manualIdle=idle;running=true;lastSend=0;
         lastMotion=noMotionSince=now();cooldown=now()+1500;connection=client.getNetworkHandler();
         report=client.runDirectory.toPath().resolve("logs/command-probe/"+LocalDateTime.now().toString().replace(':','-')+".csv");
@@ -111,25 +112,28 @@ public class ProbeClient implements ClientModInitializer {
         var client=MinecraftClient.getInstance();
         pulse=true;resetStarted=now();
         flagsReset=variant.stopFlags();
-        if(flagsReset){
-            client.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(client.player,ClientCommandC2SPacket.Mode.STOP_SPRINTING));
-            client.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(client.player,ClientCommandC2SPacket.Mode.RELEASE_SHIFT_KEY));
-        }
+        var state=(PlayerStateAccess)client.player;
+        stoppedSprint=flagsReset&&state.probe$lastSprint();
+        stoppedSneak=flagsReset&&state.probe$lastSneak();
+        if(stoppedSneak)client.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(client.player,ClientCommandC2SPacket.Mode.RELEASE_SHIFT_KEY));
         client.getNetworkHandler().sendPacket(new PlayerInputC2SPacket(PlayerInput.DEFAULT));
+        if(stoppedSprint)client.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(client.player,ClientCommandC2SPacket.Mode.STOP_SPRINTING));
     }
     private void restoreInput() {
         if(!pulse)return;
-        pulse=false;prepared=false;restoreFrame=-1;
+        pulse=false;
         var client=MinecraftClient.getInstance();
         if(client.player!=null&&client.getNetworkHandler()==connection){
             try{
+                var state=(PlayerStateAccess)client.player;
+                boolean sprint=client.player.isSprinting(),sneak=client.player.isSneaking();
+                if(flagsReset&&sneak&&(stoppedSneak||!state.probe$lastSneak()))
+                    client.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(client.player,ClientCommandC2SPacket.Mode.PRESS_SHIFT_KEY));
                 client.getNetworkHandler().sendPacket(new PlayerInputC2SPacket(input()));
-                if(flagsReset){
-                    var sprint=client.player.isSprinting()?ClientCommandC2SPacket.Mode.START_SPRINTING:ClientCommandC2SPacket.Mode.STOP_SPRINTING;
-                    var sneak=client.player.isSneaking()?ClientCommandC2SPacket.Mode.PRESS_SHIFT_KEY:ClientCommandC2SPacket.Mode.RELEASE_SHIFT_KEY;
-                    client.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(client.player,sprint));
-                    client.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(client.player,sneak));
-                }
+                if(flagsReset&&sprint&&(stoppedSprint||!state.probe$lastSprint()))
+                    client.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(client.player,ClientCommandC2SPacket.Mode.START_SPRINTING));
+                state.probe$lastInput(input());
+                if(flagsReset){state.probe$lastSprint(sprint);state.probe$lastSneak(sneak);}
                 flagsReset=false;
             }
             catch(RuntimeException e){message("Не удалось восстановить ввод: "+e.getClass().getSimpleName());}
@@ -140,8 +144,6 @@ public class ProbeClient implements ClientModInitializer {
             finish("Другая проверка отправила /checkmute. Замер остановлен для сохранения соответствия ответов.");
     }
     private void tick() {
-        frames++;
-        if(pulse&&restoreFrame>=0&&frames>=restoreFrame)restoreInput();
         if(!running)return;
         var client=MinecraftClient.getInstance();long time=now();
         if(client.player==null||client.getNetworkHandler()!=connection){finish("Соединение изменилось");return;}
@@ -155,7 +157,7 @@ public class ProbeClient implements ClientModInitializer {
         }
         if(suite!=null&&suite.finished()){finish("Автотест завершён");return;}
         if(suite==null&&manualNames.isEmpty()){finish("Готово");return;}
-        if(client.currentScreen!=null||time<cooldown){if(prepared)restoreInput();return;}
+        if(client.currentScreen!=null||time<cooldown){queued=false;return;}
         if(calibration){
             if(!moving(actual)&&speed<=0.01&&!client.player.isSprinting()&&!client.player.isSneaking()&&time-lastMotion>=300){
                 variant=new ProbeSuite.Variant("stationary-control",1000,-1);
@@ -168,17 +170,33 @@ public class ProbeClient implements ClientModInitializer {
         variant=suite==null?new ProbeSuite.Variant(manualIdle?"manual-idle":"manual",delay,-1):suite.current();
         if(time-lastSend<variant.interval())return;
         if(suite!=null&&!moving(actual)){
-            if(prepared)restoreInput();
+            queued=false;
             if(time-noMotionSince>=20000)finish("Нет движения 20 секунд. Данных для продолжения недостаточно.");
             return;
         }
         noMotionSince=time;
         if(suite==null&&manualIdle&&time-lastMotion<settle)return;
-        if(variant.resetTicks()>=0&&!prepared){
-            prepared=true;preparedFrame=frames;resetInput();
+        if(suite!=null&&client.player.isSneaking()){
+            queued=false;
+            if(!waitingSneak)message("Отпусти приседание для продолжения теста.");
+            waitingSneak=true;return;
         }
-        if(prepared&&frames-preparedFrame<variant.resetTicks())return;
-        send(actual,speed,time);
+        waitingSneak=false;
+        queued=true;
+    }
+    public void networkSlot(boolean beforeMove) {
+        if(!running||!queued||variant==null||variant.beforeMove()!=beforeMove)return;
+        var client=MinecraftClient.getInstance();
+        queued=false;
+        if(client.player==null||client.getNetworkHandler()!=connection||client.currentScreen!=null)return;
+        var actual=input();
+        if(suite!=null&&(!moving(actual)||client.player.isSneaking()))return;
+        double speed=Math.hypot(client.player.getVelocity().x,client.player.getVelocity().z);
+        try {
+            if(variant.resetTicks()>=0)resetInput();
+            send(actual,speed,now());
+        }catch(RuntimeException e){finish("Ошибка отправки в сетевом тике: "+e.getClass().getSimpleName());}
+        finally{restoreInput();}
     }
     private static String csv(Object value){return "\""+String.valueOf(value).replace("\"","\"\"").replace("\n"," ").replace("\r"," ")+"\"";}
     private void send(PlayerInput actual,double speed,long time) {
@@ -186,11 +204,11 @@ public class ProbeClient implements ClientModInitializer {
         pending=suite==null?manualNames.removeFirst():suite.target();
         lastTarget=pending;lastVariant=variant;response=false;rawReply="";observed.setLength(0);
         String phase=controlRequest?"stationary-control":suite==null?"manual":suite.phase();
-        samplePrefix=String.join(",",List.of(csv(pending),csv(phase),csv(variant.id()),csv(variant.interval()),csv(lastSend==0?0:time-lastSend),csv(variant.resetTicks()),csv(variant.stopFlags()),csv(pulse?time-resetStarted:0),
+        samplePrefix=String.join(",",List.of(csv(pending),csv(phase),csv(variant.id()),csv(variant.interval()),csv(lastSend==0?0:time-lastSend),csv(variant.resetTicks()),csv(variant.beforeMove()?"before-move":"tick-start"),csv(variant.stopFlags()),csv(pulse?time-resetStarted:0),
             csv(moving(actual)),csv(actual.forward()),csv(actual.backward()),csv(actual.left()),csv(actual.right()),csv(actual.jump()),csv(actual.sprint()),csv(actual.sneak()),
             csv(client.player.isSprinting()),csv(client.player.isSneaking()),csv(String.format(Locale.ROOT,"%.5f",speed)),csv(time-lastMotion)));
-        sent=lastSend=time;prepared=false;
-        if(pulse)restoreFrame=frames+1;
+        sent=lastSend=time;
+
         try{
             ownCommand=true;
             client.getNetworkHandler().sendChatCommand("checkmute "+pending);
@@ -253,7 +271,7 @@ public class ProbeClient implements ClientModInitializer {
     private void finish(String reason) {
         if(!running)return;
         if(!pending.isEmpty()){record(response?"reply_before_stop":"cancelled",response?answeredAt-sent:now()-sent,rawReply);pending="";}
-        running=false;restoreInput();manualNames.clear();
+        running=false;queued=false;restoreInput();manualNames.clear();
         Path file=report;String data=String.join("\n",rows)+"\n";
         String summary=reason+"\nКонтроль стоя: "+controlState+"\n"+(suite==null?"Ручной режим.\n":suite.summary())+"\nCSV: "+file.toAbsolutePath()+"\nСтрок: "+rowCount+"\n";
         writer.execute(()->{

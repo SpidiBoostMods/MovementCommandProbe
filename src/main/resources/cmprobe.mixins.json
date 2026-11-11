@@ -1,1 +1,1 @@
-{"required":true,"package":"net.spidiboost.cmprobe.mixin","compatibilityLevel":"JAVA_21","client":["NetworkProbe","CommandProbe"],"injectors":{"defaultRequire":1}}
+{"required":true,"package":"net.spidiboost.cmprobe.mixin","compatibilityLevel":"JAVA_21","client":["NetworkProbe","CommandProbe","PlayerStateAccess","MovementSlotProbe"],"injectors":{"defaultRequire":1}}

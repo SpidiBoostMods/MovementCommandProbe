@@ -13,10 +13,26 @@ import net.spidiboost.cmprobe.*;
 
 public class NativeProbe implements ClientModInitializer {
     private long deadline=System.nanoTime()+180_000_000_000L;
+    private static boolean movementSeen, sprintSeen;
+    private static int orderViolations;
+    public static void trace(net.minecraft.network.packet.Packet<?> packet) {
+        var client=net.minecraft.client.MinecraftClient.getInstance();
+        if(!client.isOnThread()||client.player==null)return;
+        if(packet instanceof net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket)movementSeen=true;
+        if(packet instanceof net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket action){
+            var mode=action.getMode();
+            boolean sprint=mode==net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket.Mode.START_SPRINTING||mode==net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket.Mode.STOP_SPRINTING;
+            boolean sneak=mode==net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket.Mode.PRESS_SHIFT_KEY||mode==net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket.Mode.RELEASE_SHIFT_KEY;
+            if((sprint||sneak)&&movementSeen)orderViolations++;
+            if(sneak&&sprintSeen)orderViolations++;
+            if(sprint)sprintSeen=true;
+        }
+    }
     private int step;
     private boolean finished;
     private final AtomicInteger flags=new AtomicInteger(),answers=new AtomicInteger();
     public void onInitializeClient(){
+        ClientTickEvents.START_CLIENT_TICK.register(c->{movementSeen=false;sprintSeen=false;});
         CommandRegistrationCallback.EVENT.register((dispatcher,access,environment)->dispatcher.register(
             CommandManager.literal("checkmute").then(CommandManager.argument("nick",StringArgumentType.word()).executes(ctx->{
                 var player=ctx.getSource().getPlayerOrThrow();
@@ -56,6 +72,7 @@ public class NativeProbe implements ClientModInitializer {
                     var controlState=ProbeClient.class.getDeclaredField("controlState");controlState.setAccessible(true);
                     if(!controlState.get(ProbeClient.instance).equals("ответ получен"))throw new AssertionError("stationary control not validated");
                     if(flags.get()<2)throw new AssertionError("baseline not tested with actual movement input");
+                    if(orderViolations!=0)throw new AssertionError("packet ordering violations "+orderViolations);
                     if(answers.get()<4||suite.winner()==null)throw new AssertionError("reset variants not validated");
                     client.options.forwardKey.setPressed(false);client.options.sprintKey.setPressed(false);client.options.jumpKey.setPressed(false);
                     Files.writeString(client.runDirectory.toPath().resolve("result.txt"),"PASS");
