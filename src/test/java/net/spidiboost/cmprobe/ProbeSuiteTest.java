@@ -5,6 +5,17 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ProbeSuiteTest {
+    @Test void inputResetAloneCannotQualifyWhenSeparateSprintFlagRemains(){
+        var suite=new ProbeSuite(List.of("A"));
+        while(suite.phase().equals("sampling")) {
+            boolean full=suite.current().stopFlags();
+            if(full){suite.result(true);suite.result(true);suite.result(true);}
+            else suite.result(false);
+        }
+        assertTrue(suite.current().stopFlags());
+        suite.result(true);
+        assertTrue(suite.finished());assertTrue(suite.winner().stopFlags());
+    }
     @Test void firstFailureAdvancesAndDoesNotEndTheSuite(){
         var suite=new ProbeSuite(List.of("A","B"));
         var first=suite.current();suite.result(false);

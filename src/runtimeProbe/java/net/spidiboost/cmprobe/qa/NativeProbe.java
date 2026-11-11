@@ -21,9 +21,9 @@ public class NativeProbe implements ClientModInitializer {
             CommandManager.literal("checkmute").then(CommandManager.argument("nick",StringArgumentType.word()).executes(ctx->{
                 var player=ctx.getSource().getPlayerOrThrow();
                 var input=player.getPlayerInput();
-                if(input.forward()||input.backward()||input.left()||input.right()||input.jump()){
+                if(input.forward()||input.backward()||input.left()||input.right()||input.jump()||player.isSprinting()||player.isSneaking()){
                     flags.incrementAndGet();
-                    player.sendMessage(Text.literal("AC » ProbeQA failed ChatC (x1) sprinting=false, sneaking=false, input=true"));
+                    player.sendMessage(Text.literal("AC » ProbeQA failed ChatC (x1) sprinting="+player.isSprinting()+", sneaking="+player.isSneaking()+", input="+(input.forward()||input.backward()||input.left()||input.right()||input.jump())));
                 }else{
                     answers.incrementAndGet();
                     player.sendMessage(Text.literal("Цель не замучена!"));
@@ -35,7 +35,13 @@ public class NativeProbe implements ClientModInitializer {
             try{
                 if(System.nanoTime()>deadline)throw new AssertionError("native suite timed out");
                 if(client.player==null||client.getServer()==null||client.player.age<60)return;
-                client.options.forwardKey.setPressed(true);
+                var calibration=ProbeClient.class.getDeclaredField("calibration");calibration.setAccessible(true);
+                var control=ProbeClient.class.getDeclaredField("controlRequest");control.setAccessible(true);
+                boolean moving=step>0&&!calibration.getBoolean(ProbeClient.instance)&&!control.getBoolean(ProbeClient.instance);
+                client.options.forwardKey.setPressed(moving);
+                client.options.sprintKey.setPressed(moving);
+                client.options.jumpKey.setPressed(moving);
+                if(moving)client.player.setSprinting(true);
                 if(step==0){
                     if(client.player.age<70)return;
                     if(ProbeClient.instance==null)throw new AssertionError("entrypoint missing");
@@ -47,15 +53,17 @@ public class NativeProbe implements ClientModInitializer {
                     if(field.getBoolean(ProbeClient.instance))return;
                     var suiteField=ProbeClient.class.getDeclaredField("suite");suiteField.setAccessible(true);
                     var suite=(ProbeSuite)suiteField.get(ProbeClient.instance);
+                    var controlState=ProbeClient.class.getDeclaredField("controlState");controlState.setAccessible(true);
+                    if(!controlState.get(ProbeClient.instance).equals("ответ получен"))throw new AssertionError("stationary control not validated");
                     if(flags.get()<2)throw new AssertionError("baseline not tested with actual movement input");
                     if(answers.get()<4||suite.winner()==null)throw new AssertionError("reset variants not validated");
-                    client.options.forwardKey.setPressed(false);
+                    client.options.forwardKey.setPressed(false);client.options.sprintKey.setPressed(false);client.options.jumpKey.setPressed(false);
                     Files.writeString(client.runDirectory.toPath().resolve("result.txt"),"PASS");
                     System.out.println("Native auto suite passed: flags="+flags.get()+" answers="+answers.get()+" winner="+suite.winner().id());
                     finished=true;client.scheduleStop();
                 }
             }catch(Throwable e){
-                e.printStackTrace();finished=true;client.options.forwardKey.setPressed(false);
+                e.printStackTrace();finished=true;client.options.forwardKey.setPressed(false);client.options.sprintKey.setPressed(false);client.options.jumpKey.setPressed(false);
                 try{Files.writeString(client.runDirectory.toPath().resolve("result.txt"),"FAIL "+e);}catch(Exception ignored){}
                 client.scheduleStop();
             }

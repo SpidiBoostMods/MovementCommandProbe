@@ -3,16 +3,20 @@ package net.spidiboost.cmprobe;
 import java.util.*;
 
 public final class ProbeSuite {
-    public record Variant(String id, long interval, int resetTicks) {}
+    public record Variant(String id, long interval, int resetTicks, boolean stopFlags) {
+        public Variant(String id,long interval,int resetTicks){this(id,interval,resetTicks,false);}
+    }
     public static final List<Variant> VARIANTS = List.of(
         new Variant("ordinary-1000",1000,-1),
-        new Variant("ordinary-2000",2000,-1),
-        new Variant("reset-now-1000",1000,0),
-        new Variant("reset-now-500",500,0),
-        new Variant("reset-now-250",250,0),
-        new Variant("reset-1tick-1000",1000,1),
-        new Variant("reset-1tick-500",500,1),
-        new Variant("reset-2ticks-1000",1000,2)
+        new Variant("input-only-1000",1000,0),
+        new Variant("full-reset-now-1000",1000,0,true),
+        new Variant("full-reset-now-500",500,0,true),
+        new Variant("full-reset-now-250",250,0,true),
+        new Variant("full-reset-1tick-1000",1000,1,true),
+        new Variant("full-reset-1tick-500",500,1,true),
+        new Variant("full-reset-2ticks-1000",1000,2,true),
+        new Variant("full-reset-4ticks-1000",1000,4,true),
+        new Variant("full-reset-6ticks-1000",1000,6,true)
     );
     public static final class Stats {
         public int replies, failures, tabReplies;
@@ -56,6 +60,7 @@ public final class ProbeSuite {
     }
     public void invalidate(Variant variant) {
         if(variant==null)return;
+        if(!results.containsKey(variant))return;
         results.get(variant).failures++;
         if(tab&&current.equals(variant)){winner=null;finished=false;selectCandidate();}
     }
@@ -77,12 +82,13 @@ public final class ProbeSuite {
         var text=new StringBuilder();
         if(winner!=null)text.append("Кандидат прошёл TAB: ").append(winner.id()).append("\n");
         else text.append("Подтверждённого варианта для всего TAB нет.\n");
-        text.append("Проверяются обычные команды и временный сброс ввода перед отправкой.\n")
+        text.append("Проверяются обычные команды, сброс ввода и снятие спринта/приседания перед отправкой.\n")
             .append("Один проход отражает условия этого запуска и не гарантирует будущие результаты.\n\n");
         for(var entry:results.entrySet()){
             var variant=entry.getKey();var stats=entry.getValue();
             text.append(variant.id()).append(" | интервал ").append(variant.interval())
                 .append(" мс | сброс ").append(variant.resetTicks()<0?"нет":variant.resetTicks()+" тиков")
+                .append(" | снятие флагов ").append(variant.stopFlags())
                 .append(" | ответов ").append(stats.replies).append(" | ошибок ").append(stats.failures)
                 .append(" | ответов TAB ").append(stats.tabReplies).append("\n");
         }
