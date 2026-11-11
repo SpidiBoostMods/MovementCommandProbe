@@ -1,5 +1,5 @@
 plugins { id 'fabric-loom' version '1.9.2' }
-version = '1.0.0'
+version = '1.0.1'
 group = 'net.spidiboost'
 base { archivesName = 'movement-command-probe-1.21.4' }
 repositories { mavenCentral() }
@@ -17,3 +17,30 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 test { useJUnitPlatform() }
+sourceSets { runtimeProbe {
+    compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
+    runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
+} }
+if(project.hasProperty('nativeProbe')){
+    loom.mods { movement_command_probe { sourceSet sourceSets.main }; probe_fixture { sourceSet sourceSets.runtimeProbe } }
+    loom.runs { verification {
+        client(); source sourceSets.runtimeProbe; runDir 'build/native-verification'
+        programArgs '--username','ProbeQA'
+        if(System.getProperty('os.name').startsWith('Mac'))vmArg '-XstartOnFirstThread'
+    } }
+    tasks.named('runVerification') {
+        doFirst {
+            def options=file('build/native-verification/options.txt')
+            options.parentFile.mkdirs()
+            options.text='''onboardAccessibility:false
+maxFps:60
+soundCategory_master:0.0
+'''
+            file('build/native-verification/result.txt').delete()
+        }
+        doLast {
+            def result=file('build/native-verification/result.txt')
+            if(!result.isFile()||result.text.trim()!='PASS')throw new GradleException('Native probe did not complete')
+        }
+    }
+}

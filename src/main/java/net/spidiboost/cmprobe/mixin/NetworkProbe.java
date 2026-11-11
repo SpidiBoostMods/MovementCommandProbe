@@ -1,4 +1,6 @@
-package net.spidiboost.cmprobe;
+package net.spidiboost.cmprobe.mixin;
+
+import net.spidiboost.cmprobe.ProbeClient;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayNetworkHandler;

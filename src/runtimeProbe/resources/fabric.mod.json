@@ -1,0 +1,1 @@
+{"schemaVersion":1,"id":"probe_fixture","version":"1","name":"Probe fixture","environment":"client","entrypoints":{"client":["net.spidiboost.cmprobe.qa.NativeProbe"]}}

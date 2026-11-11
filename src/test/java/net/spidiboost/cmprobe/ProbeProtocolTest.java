@@ -4,6 +4,14 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ProbeProtocolTest {
+    @Test void entrypointsMustBeOutsideReservedMixinPackage() throws Exception {
+        var loader=getClass().getClassLoader();
+        try(var mod=loader.getResourceAsStream("fabric.mod.json");var mixins=loader.getResourceAsStream("cmprobe.mixins.json")) {
+            var metadata=com.google.gson.JsonParser.parseString(new String(mod.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8)).getAsJsonObject();
+            String reserved=com.google.gson.JsonParser.parseString(new String(mixins.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8)).getAsJsonObject().get("package").getAsString()+".";
+            for(var entry:metadata.getAsJsonObject("entrypoints").getAsJsonArray("client"))assertFalse(entry.getAsString().startsWith(reserved));
+        }
+    }
     @Test void bindsChatCToSelfAndRejectsPlayerChat(){
         String sample="AC » SpidiBoost failed ChatC (x35) sprinting=false, sneaking=false, input=true";
         assertTrue(ProbeProtocol.chatC(sample,"spidiboost"));
