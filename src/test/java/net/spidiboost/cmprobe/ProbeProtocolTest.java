@@ -19,6 +19,8 @@ class ProbeProtocolTest {
         assertFalse(ProbeProtocol.chatC(sample,"Other"));
         assertFalse(ProbeProtocol.chatC("Somebody » "+sample,"SpidiBoost"));
         assertFalse(ProbeProtocol.chatC(sample.replace("ChatC","ChatCombat"),"SpidiBoost"));
+        assertEquals("ChatCombat",ProbeProtocol.failure(sample.replace("ChatC","ChatCombat"),"SpidiBoost"));
+        assertEquals("",ProbeProtocol.failure(sample,"Another"));
     }
     @Test void muteAnswersHaveExactTargetAndIgnoreUnrelatedChat(){
         for(String line:new String[]{"Цель [A]: заткнута.","Цель A замучена:","Target [A] is muted","Цель не замучена!","Цель не заткнута!"})assertTrue(ProbeProtocol.reply(line,"A"),line);

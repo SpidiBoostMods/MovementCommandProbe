@@ -4,10 +4,15 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 public final class ProbeProtocol {
+    private static final Pattern FAILURE=Pattern.compile("(?iu)^AC\\s*»\\s*([a-z0-9_]{1,16})\\s+failed\\s+([a-z0-9_]+)\\b.*");
     private static final Pattern CHATC=Pattern.compile("(?iu)^AC\\s*»\\s*([a-z0-9_]{1,16})\\s+failed\\s+ChatC\\b.*");
     private static final Pattern TARGET=Pattern.compile("(?iu)^(?:Цель|Target)\\s*:?\\s*(?:\\[([a-z0-9_]{1,16})]|([a-z0-9_]{1,16})(?=\\s))(.*)");
     private static final Pattern EMPTY=Pattern.compile("(?iu)^(?:цель\\s+не\\s+(?:заткнута|замучена|замутена)|target(?: is)? not muted)[.! ]*$");
     private ProbeProtocol(){}
+    public static String failure(String line,String player){
+        var match=FAILURE.matcher(clean(line));
+        return match.matches()&&match.group(1).equalsIgnoreCase(player)?match.group(2):"";
+    }
     public static String clean(String line){
         return line.replaceAll("(?i)§[0-9a-fk-orx]","").replace('\u00a0',' ').replaceAll("^\\[\\d{1,2}:\\d{2}:\\d{2}]\\s*","").strip();
     }
